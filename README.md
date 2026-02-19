@@ -1,2 +1,2 @@
-# SynCrowd
+# SynMVCrowd
 A large synthetic multi-view crowd counting and localization benchmark.
