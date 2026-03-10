@@ -1,7 +1,8 @@
 # SynMVCrowd
-Qi Zhang, Daijie Chen, Yunfei Gong, and Hui Huang. SynMVCrowd: A Large Synthetic Benchmark for Multi-View Crowd Counting and Localization, IJCV 2026.
+A large synthetic multi-view crowd counting and localization benchmark.
 
 ## Overview
+SynMVCrowd: A Large Synthetic Benchmark for Multi-View Crowd Counting and Localization
 
 Overview
 This repository provides the code implementation for the baselines proposed in the paper "SynMVCrowd: A Large Synthetic Benchmark for Multi-view Crowd Counting and Localization". The SynMVCrowd benchmark is the largest synthetic dataset for multi-view and single-image crowd vision tasks, featuring 50 diverse scenes, 50 camera views per scene, 200 multi-view frames per scene, and crowd sizes ranging from 200 to 1000 people (average >500). It supports practical evaluation of multi-view crowd counting, localization, and domain transfer under cross-scene settings.
@@ -62,3 +63,26 @@ Command-Line Arguments
 - pretrained_dir: Path to pretrained model (e.g., SynMVCrowd checkpoint).
 - visualize: Enable visualization.
 - test: Run in test mode only.
+
+## Ackonwledgement
+This work was supported in parts by National Natural Science Foundation of China (No. 62202312, U21B2023, U2001206), Guangdong Basic
+and Applied Basic Research Foundation (2023B1515120026), DEGP Innovation
+Team (2022KCXTD025), Shenzhen Science and Technology Program (KQTD
+20210811090044003, RCJC20200714114435012), Guangdong Laboratory of Artificial
+Intelligence and Digital Economy (SZ), and Scientific Development Funds from
+Shenzhen University
+
+## Reference
+```
+@article{Zhang_2026_SynMVCrowd,
+    author  = {Q. Zhang and D. Chen and Y. Gong and H. Huang},
+    title   = {{SynMVCrowd}: A Large Synthetic Benchmark for Multi-view Crowd Counting and Localization},
+    journal = {International Journal of Computer Vision},
+    year    = {2026},
+    volume  = {134},
+    pages   = {191},
+    month   = mar,
+    doi     = {10.1007/s11263-026-02778-3},
+    url     = {https://doi.org/10.1007/s11263-026-02778-3}
+}
+```
