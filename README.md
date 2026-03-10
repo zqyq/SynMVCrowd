@@ -65,7 +65,7 @@ Command-Line Arguments
 - test: Run in test mode only.
 
 ## Ackonwledgement
-This work was supported in parts by National Natural Science Foundation of China (No. 62202312, U21B2023, U2001206), Guangdong Basic
+This work was supported in parts by National Natural Science Foundation of China (No. 62202312, U21B2023, U2001206), Guangdong Basic
 and Applied Basic Research Foundation (2023B1515120026), DEGP Innovation
 Team (2022KCXTD025), Shenzhen Science and Technology Program (KQTD
 20210811090044003, RCJC20200714114435012), Guangdong Laboratory of Artificial
