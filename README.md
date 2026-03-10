@@ -1,8 +1,7 @@
 # SynMVCrowd
-A large synthetic multi-view crowd counting and localization benchmark.
+Qi Zhang, Daijie Chen, Yunfei Gong, and Hui Huang. SynMVCrowd: A Large Synthetic Benchmark for Multi-View Crowd Counting and Localization, IJCV 2026.
 
 ## Overview
-SynMVCrowd: A Large Synthetic Benchmark for Multi-View Crowd Counting and Localization
 
 Overview
 This repository provides the code implementation for the baselines proposed in the paper "SynMVCrowd: A Large Synthetic Benchmark for Multi-view Crowd Counting and Localization". The SynMVCrowd benchmark is the largest synthetic dataset for multi-view and single-image crowd vision tasks, featuring 50 diverse scenes, 50 camera views per scene, 200 multi-view frames per scene, and crowd sizes ranging from 200 to 1000 people (average >500). It supports practical evaluation of multi-view crowd counting, localization, and domain transfer under cross-scene settings.
