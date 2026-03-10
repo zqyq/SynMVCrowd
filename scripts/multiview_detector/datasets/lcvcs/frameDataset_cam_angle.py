@@ -1,0 +1,646 @@
+# from sklearn import feature_extraction
+import json
+import os
+import random
+
+import cv2
+# import sys
+import numpy as np
+import torch
+from scipy.stats import multivariate_normal
+from torchvision.datasets import VisionDataset
+from torchvision.transforms import ToTensor
+
+
+# import h5py
+# from scipy import ndimage
+# import scipy
+# import scipy.ndimage
+# import scipy.io as sio
+
+
+class frameDataset(VisionDataset):
+    def __init__(self, base, train=True, transform=ToTensor(), target_transform=ToTensor(),
+                 reID=False, grid_reduce=4, img_reduce=4, num_cam=3, frames=200, scale=100, **kwargs):
+        super().__init__(base.root, transform=transform, target_transform=target_transform)
+
+        map_sigma, map_kernel_size = 20 / grid_reduce, 20
+        img_sigma, img_kernel_size = 10 / img_reduce, 10
+        self.reID, self.grid_reduce, self.img_reduce = reID, grid_reduce, img_reduce
+        self.scale = scale
+        self.base = base
+        self.train = train
+        self.root, self.num_cam, self.num_frame = base.root, base.num_cam, base.num_frame
+        self.img_shape, self.worldgrid_shape = base.img_shape, base.worldgrid_shape  # H,W; N_row,N_col
+        self.reducedgrid_shape = list(map(lambda x: int(x / self.grid_reduce), self.worldgrid_shape))
+
+        # CVCS dataset parameters:
+        data_file = '/mnt/d/Datasets/LCVCS'
+        label_file = '/mnt/d/Datasets/LCVCS'
+        self.transform = transform
+
+        # read images
+        if train:
+            self.file_path = os.path.join(data_file, 'train')
+            self.label_file_path = os.path.join(label_file, 'train')
+
+            # self.depthMap_file_path = depthMap_file + 'train/'
+        else:
+            self.file_path = os.path.join(data_file, 'val')
+            self.label_file_path = os.path.join(label_file, 'val')
+
+            # self.depthMap_file_path = depthMap_file + 'val/'
+
+        self.gt_fpath = self.file_path
+
+        self.cropped_size = [200, 200]
+        self.patch_num = 3
+
+        self.batch_size = 1
+
+        self.num_cam = num_cam
+        self.view_size = self.num_cam
+        print(f'Using {self.view_size} views')
+        self.r = 5
+        # 2 # 0.5m/pixel
+        # 10: 0.1m/pixel
+        # 5: 0.2m/pixel
+
+        self.a = 5
+        self.b = 5
+        # cropped_size, r, a, b, patch_num
+
+        random.seed(14)
+
+        # list M scenes:
+        self.scene_name_list = sorted(os.listdir(self.file_path))  # 2scenes model training
+        self.nb_scenes = len(self.scene_name_list)
+        #
+        # if train:
+        #     self.nb_samplings = 5 # int(nb_frames/view_size/batch_size + 1)#*3 for epochFixed *3; for epochFixed2, not.
+        # else:
+        #     self.nb_samplings = 1  # int(nb_frames/view_size/batch_size + 1)
+        self.nb_samplings = 5
+        self.frames = frames
+
+        x, y = np.meshgrid(np.arange(-map_kernel_size, map_kernel_size + 1),
+                           np.arange(-map_kernel_size, map_kernel_size + 1))
+        pos = np.stack([x, y], axis=2)
+        map_kernel = multivariate_normal.pdf(pos, [0, 0], np.identity(2) * map_sigma)
+        map_kernel = map_kernel / map_kernel.max()
+        kernel_size = map_kernel.shape[0]
+        self.map_kernel = torch.zeros([1, 1, kernel_size, kernel_size], requires_grad=False)
+        self.map_kernel[0, 0] = torch.from_numpy(map_kernel)
+
+        x, y = np.meshgrid(np.arange(-img_kernel_size, img_kernel_size + 1),
+                           np.arange(-img_kernel_size, img_kernel_size + 1))
+        pos = np.stack([x, y], axis=2)
+        img_kernel = multivariate_normal.pdf(pos, [0, 0], np.identity(2) * img_sigma)
+        img_kernel = img_kernel / img_kernel.max()
+        kernel_size = img_kernel.shape[0]
+
+        # only use head labels:
+        self.img_kernel = torch.zeros([1, 1, kernel_size, kernel_size], requires_grad=False)
+        self.img_kernel[0, 0] = torch.from_numpy(img_kernel)
+        # self.img_kernel[1, 1] = torch.from_numpy(img_kernel)
+        pass
+        # 当前所需角度区域
+        self.degree_range = kwargs['degree_range']  # 90 180 360
+        self.degree_set = {-30: [],
+                           -60: [],
+                           -90: [],
+                           30: [],
+                           60: [],
+                           90: []}
+
+    @staticmethod
+    def read_json_frame(coords_info, cropped_size, r, a, b, patch_num):
+
+        # set the wld map paras
+        wld_map_paras = coords_info['wld_map_paras']
+        s, r0, a0, b0, h4, w4, d_delta, d_mean, w_min, h_min = wld_map_paras  # old 640*480 labels
+
+        # reconstruct wld_map_paras:
+        w_max = (4 * w4 - 2 * a0) / r0 + w_min
+        h_max = (4 * h4 - 2 * b0) / r0 + h_min
+
+        # actual size:
+        w_actual = int((w_max - w_min + 2 * a)) * r
+        h_actual = int((h_max - h_min + 2 * b)) * r
+
+        h_actual = int(max(h_actual, cropped_size[0] + patch_num))
+        w_actual = int(max(w_actual, cropped_size[1] + patch_num))
+
+        # create patch_num patches' bbox coordinates:
+        ## h: 0~h_actual-cropped_size[0], w: 0~w_actual-cropped_size[1]
+        h_range = range(0, h_actual - cropped_size[0] + 1)
+        w_range = range(0, w_actual - cropped_size[1] + 1)
+
+        h_random = random.sample(h_range, k=patch_num)
+        w_random = random.sample(w_range, k=patch_num)
+        hw_random = np.asarray([h_random, w_random])
+
+        wld_map_paras = [r, a, b, h_actual, w_actual, d_mean, w_min, h_min, w_max, h_max]
+
+        # get people 2D and 3D coords:
+        coords = coords_info['image_info']
+
+        # coords_2d_all = [] #np.zeros((1, 2))
+        coords_3d_id_all = []  # np.zeros((1, 3))
+
+        # id = 0
+        for point in coords:
+            id = point['idx']
+            coords_3d_id = point['world'] + [id]
+            coords_3d_id_all.append(coords_3d_id)
+
+        coords_3d_id_all = np.asarray(coords_3d_id_all, dtype='float32')
+
+        # form the para list:
+        return coords_3d_id_all, wld_map_paras, hw_random
+
+    def calculate_yaw(self, rvec):
+        rvec = np.array(rvec)  # 确保是numpy数组
+        rotation_matrix, _ = cv2.Rodrigues(rvec)  # _ 是雅可比矩阵，我们不需要
+
+        # print("Rotation Matrix:")
+        # print(rotation_matrix)
+
+        # 2. 从旋转矩阵中提取偏航角 (Yaw) - 水平角度
+        # 注意：atan2(y, x) 返回的是从x轴到点(x,y)的弧度值
+        yaw_rad = np.arctan2(rotation_matrix[2, 0], rotation_matrix[0, 0])
+
+        # 3. 将弧度转换为角度（更直观）
+        yaw_deg = np.degrees(yaw_rad)
+
+        def normalize_angle(angle_deg):
+            """将角度规范化到0到360度范围"""
+            normalized_angle = angle_deg % 360  # 先取模360
+            # 由于负数的模运算可能仍然返回负数，需要进一步处理
+            if normalized_angle < 0:
+                normalized_angle += 360
+            return normalized_angle
+
+        normalized_yaw = normalize_angle(yaw_deg)
+
+        # print(f"\nCamera Horizontal Angle (Yaw):")
+        # print(f"  {yaw_rad:.4f} radians")
+        # print(f"  {yaw_deg:.2f} degrees")
+        return normalized_yaw
+
+    def calculate_pitch(self, rvec, y_axis_up=True):
+        """
+        修正的俯仰角计算
+        y_axis_up: 如果坐标系Y轴向上则为True，向下则为False
+        """
+        R, _ = cv2.Rodrigues(np.array(rvec))
+        forward_vector = R[:, 2]
+
+        # print(f"原始前向向量: {forward_vector}")
+
+        if y_axis_up:
+            # 传统3D图形坐标系：Y轴向上
+            vertical_component = forward_vector[1]
+        else:
+            # OpenCV风格：Y轴向下
+            vertical_component = -forward_vector[1]
+
+        pitch_rad = np.arcsin(vertical_component)
+        pitch_deg = np.degrees(pitch_rad)
+
+        # print(f"修正后俯仰角: {pitch_deg:.2f}°")
+        return pitch_deg
+
+    # @staticmethod
+    def read_json_view(self, coords_info):
+
+        # # get camera location
+        camera_loc = np.asarray(coords_info['camera']['location'])
+        #
+        # # get camera rotation
+        # rotation = np.asarray(coords_info['camera']['rotation'])
+
+        # get camera matrix
+        cameraMatrix = np.asarray(coords_info['cameraMatrix'])
+        fx = cameraMatrix[0][0]
+        fy = cameraMatrix[1][1]
+        u = cameraMatrix[0][2]
+        v = cameraMatrix[1][2]
+
+        # get camera matrix:
+        distCoeffs = coords_info['distCoeffs']
+
+        rvec = coords_info['rvec']
+        tvec = coords_info['tvec']
+        pitch = self.calculate_pitch(rvec)
+        camera_paras = [fx] + [fy] + [u] + [v] + distCoeffs + rvec + tvec
+        camera_paras = np.asarray(camera_paras)
+
+        # get people 2D and 3D coords:
+        coords = coords_info['image_info']
+
+        coords_2d_all = []
+        coords_3d_id_all = []
+
+        for point in coords:
+            id = point['idx']
+
+            coords_2d0 = point['pixel']
+            if coords_2d0 == None:
+                continue
+            coords_2d = [coords_2d0[1] / 1920.0, coords_2d0[0] / 1080.0]
+
+            coords_3d_id = point['world'] + [id]
+
+            coords_2d_all.append(coords_2d)
+            coords_3d_id_all.append(coords_3d_id)
+            # id = id + 1
+
+        # form the para list:
+        return coords_3d_id_all, coords_2d_all, camera_paras, camera_loc, pitch
+
+    @staticmethod
+    def density_map_creation(map_gt, w, h):
+        if map_gt.size == 0:
+            img_map_gt_i = np.zeros((h, w))
+            density_map = np.asarray(img_map_gt_i).astype('f')
+
+        else:
+
+            map_gt = np.asarray(map_gt)
+            img_dmap = np.zeros((h, w))
+
+            x = (map_gt[:, 0] * w).astype('int')
+            y = (map_gt[:, 1] * h).astype('int')
+            img_dmap[y, x] = 1
+
+            density_map = np.asarray(img_dmap).astype('f')
+
+        return density_map
+
+    # @staticmethod
+    def GP_density_map_creation(self, wld_coords, crop_size, wld_map_paras, hw_random, cam_location):
+        # we need to resize the images
+        h = int(crop_size[0])
+        w = int(crop_size[1])
+
+        r, a, b, h_actual, w_actual, d_mean, w_min, h_min, w_max, h_max = wld_map_paras
+
+        h_actual, w_actual = int(h_actual), int(w_actual)
+        patch_num = hw_random.shape[1]
+
+        whole_plane_map = np.zeros((h_actual, w_actual))
+        if wld_coords.size == 0:
+            print('wld_coords.size == 0!!!!!!!!')
+            img_map_gt_i = np.zeros((h_actual, w_actual))
+            GP_density_map = []
+            for p in range(patch_num):
+                hw = hw_random[:, p]
+                GP_density_map_i = img_map_gt_i[hw[0]:hw[0] + h, hw[1]:hw[1] + w]
+                GP_density_map.append(GP_density_map_i)
+            GP_density_map = np.asarray(GP_density_map)
+
+        else:
+            wld_coords_transed = np.zeros(wld_coords.shape)
+            wld_coords_transed[:, 0] = (wld_coords[:, 0] - w_min + a) * r
+            wld_coords_transed[:, 1] = (wld_coords[:, 1] - h_min + b) * r
+            wld_coords_transed = wld_coords_transed.astype('int')
+
+            cl = cam_location.copy()
+
+            for i in range(self.view_size):
+                try:
+                    cur_cl = cl[i]
+                except IndexError:
+                    print(f'IndexError: i={i}, len(cl)={len(cl)}')
+                    raise
+                cur_cl[0] = (cam_location[i][0] - w_min + a) * r
+                cur_cl[1] = (cam_location[i][1] - h_min + b) * r
+                # cl = cl.astype('int')
+
+            assert min(wld_coords_transed[:, 0]) >= 0 and max(wld_coords_transed[:, 0]) < w_actual
+            assert min(wld_coords_transed[:, 1]) >= 0 and max(wld_coords_transed[:, 1]) < h_actual
+
+            whole_plane_map[wld_coords_transed[:, 1], wld_coords_transed[:, 0]] = 1
+
+            GP_density_map_0 = whole_plane_map
+
+            GP_density_map = []
+            for p in range(patch_num):
+                hw = hw_random[:, p]
+                GP_density_map_i = GP_density_map_0[hw[0]:hw[0] + h, hw[1]:hw[1] + w]
+                GP_density_map.append(GP_density_map_i)
+            GP_density_map = np.asarray(GP_density_map)
+
+        cl = np.asarray(cl)
+        cl_pats = []
+        for i in range(patch_num):
+            # 注意camera坐标是x， y
+            cur = cl.copy()
+            cur[:, 0] = cl[:, 0] - hw_random[:, i][1]
+            cur[:, 1] = cl[:, 1] - hw_random[:, i][0]
+            cl_pats.append(cur)
+
+        return GP_density_map, cl_pats, whole_plane_map
+
+    @staticmethod
+    def id_unique(coords_array):
+        # intilize a null list
+        coords_array = np.asarray(coords_array)
+
+        unique_list = [[-1, -1, -1, -1]]
+
+        id = coords_array[:, -1]
+        n = id.shape[0]
+        # traverse for all elements
+
+        for i in range(n):
+            id_i = id[i]
+            coords_array_i = coords_array[i]
+
+            id_current_unique_list = list(np.asarray(unique_list)[:, -1])
+            if id_i not in id_current_unique_list:
+                unique_list.append(coords_array_i)
+
+        unique_list = unique_list[1:]
+        return unique_list
+
+    @staticmethod
+    def id_diff(coords_arrayA, coords_arrayB):  # coords_arrayA is larger
+        coords_arrayA = np.asarray(coords_arrayA)
+        coords_arrayB = np.asarray(coords_arrayB)
+
+        unique_list = []  # [[-1, -1, -1, -1]]
+
+        if coords_arrayB.size == 0:
+            unique_list = coords_arrayA
+        else:
+
+            idA = coords_arrayA[:, -1]
+            idB = coords_arrayB[:, -1]
+
+            n = idA.shape[0]
+            # traverse for all elements
+
+            for i in range(n):
+                id_i = idA[i]
+                coords_array_i = coords_arrayA[i]
+
+                # id_current_unique_list = list(np.asarray(unique_list)[:, -1])
+                if id_i not in idB:  # id_current_unique_list:
+                    unique_list.append(coords_array_i)
+
+            # unique_list = unique_list[1:]
+            unique_list = np.asarray(unique_list)
+        return unique_list
+
+    def random_crop(self, im_h, im_w, crop_h, crop_w):
+        res_h = im_h - crop_h
+        res_w = im_w - crop_w
+        i = random.randint(0, res_h)
+        j = random.randint(0, res_w)
+        return i, j, crop_h, crop_w
+
+    def __getitem__(self, index):
+        if self.train:
+            scene_index = int(index / (self.nb_samplings * 10))
+        else:
+            scene_index = int(index / (self.nb_samplings * self.frames))
+        # selection_index = int((index - scene_index * self.nb_samplings * 100) / 100)
+
+        scene_i = self.scene_name_list[scene_index]
+        # if scene_i == 'scene_24':
+        #     frame_index = (index - scene_index * self.nb_samplings * 20) % 92
+        # else:
+        #     frame_index = (index - scene_index * self.nb_samplings * 20) % 100
+
+        scene_path = os.path.join(self.file_path, scene_i)
+        scene_path_label = os.path.join(self.label_file_path, scene_i)
+
+        # list N frames:
+        frame_name_list = sorted([int(num) for num in os.listdir(scene_path_label)])
+        # select views first:
+        # frame_j = frame_name_list[frame_index]
+
+        if self.train:
+            frame_j = random.sample(frame_name_list, k=1)[0]
+        else:
+            frame_index = (index - scene_index * self.nb_samplings * self.frames) % self.frames
+            frame_j = frame_name_list[frame_index]
+
+        label_path_j = os.path.join(self.label_file_path, scene_i, str(frame_j), 'jsons/')
+        label_path_list_j = os.listdir(label_path_j)
+        # label_path_list_sampling = random.sample(label_path_list_j, k=self.view_size)
+        label_path_list_sampling = label_path_list_j
+        frame_path = os.path.join(scene_path, str(frame_j))
+        img_path = frame_path + '/jpgs/'
+        label_path = os.path.join(self.label_file_path, scene_i, str(frame_j), 'jsons/')
+
+        label_name_j = label_path_list_j[0]
+        label_path_name_j = os.path.join(label_path, label_name_j)
+
+        with open(label_path_name_j, 'r') as data_file:
+            coords_info_frame = json.load(data_file)
+        # coords_3d_id_all_frame = read_json_all(coords_info_frame)
+        coords_3d_id_all_frame, wld_map_paras_frame, hw_random = self.read_json_frame(coords_info_frame,
+                                                                                      self.cropped_size,
+                                                                                      self.r, self.a, self.b,
+                                                                                      self.patch_num)
+        wld_map_paras_frame = np.asarray(wld_map_paras_frame)
+        hw_random = np.asarray(hw_random)
+        wld_map_paras = wld_map_paras_frame
+
+        img_views = []
+        camera_paras = []
+        wld_coords = []
+        cam_locations = []
+        single_view_dmaps = []
+
+        def exist_none_img(img_name_list):
+            for p in img_name_list:
+                label_name = p
+                img_name = label_name[0:-5] + '.jpg'
+                # read images
+                img_path_name = os.path.join(img_path, img_name)
+                img = cv2.imread(img_path_name)
+                if img is None:
+                    return True
+            return False
+
+        flag = exist_none_img(label_path_list_sampling)
+
+        if flag:
+            while flag:
+                print('exist_none')
+                label_path_list_sampling = random.sample(label_path_list_j, k=self.view_size)
+                flag = exist_none_img(label_path_list_sampling)
+        i = 0
+        # print(f'len label_path_list_sampling:{len(label_path_list_sampling)}')
+        # while len(img_views) < self.view_size:
+        while i < len(label_path_list_sampling):
+            label_name = label_path_list_sampling[i % len(label_path_list_sampling)]
+            i += 1
+            img_name = label_name[0:-5] + '.jpg'
+            # read labels
+            label_path_name = os.path.join(label_path, label_name)
+            with open(label_path_name, 'r') as data_file:
+                coords_info = json.load(data_file)
+            coords, coords_2d, paras, cam_loc, cam_deg = self.read_json_view(coords_info)
+            if cam_deg < 0 and cam_deg > -30:
+                self.degree_set[-30].append((cam_deg, img_name))
+            elif cam_deg <= -30 and cam_deg > -60:
+                self.degree_set[-60].append((cam_deg, img_name))
+            elif cam_deg <= -60 and cam_deg >= -90:
+                self.degree_set[-90].append((cam_deg, img_name))
+            elif cam_deg > 0 and cam_deg < 30:
+                self.degree_set[30].append((cam_deg, img_name))
+            elif cam_deg >= 30 and cam_deg < 60:
+                self.degree_set[60].append((cam_deg, img_name))
+            elif cam_deg >= 60 and cam_deg <= 90:
+                self.degree_set[90].append((cam_deg, img_name))
+            else:
+                print(f'cam_deg={cam_deg} error!')
+        if self.degree_range == -30:
+            selected_list = self.degree_set[-30]
+        elif self.degree_range == -60:
+            selected_list = self.degree_set[-60]
+        elif self.degree_range == -90:
+            selected_list = self.degree_set[-90]
+        else:
+            raise NotImplementedError
+        if len(selected_list) >= self.view_size:
+            sampling_selected_list = random.sample(selected_list, k=self.view_size)
+        else:
+            print(f'Warning: only {len(selected_list)} views found, need {self.view_size}. Resampling.')
+            # selected_list = random.choices(selected_list, k=self.view_size)
+            sampling_selected_list = selected_list
+            while len(sampling_selected_list) < self.view_size:
+                sampling_selected_list = sampling_selected_list + selected_list
+            sampling_selected_list = sampling_selected_list[0:self.view_size]
+        for deg_view in sampling_selected_list:
+            cam_degree, img_name = deg_view
+            label_name = img_name[0:-4] + '.json'
+            label_path_name = os.path.join(label_path, label_name)
+            with open(label_path_name, 'r') as data_file:
+                coords_info = json.load(data_file)
+            coords, coords_2d, paras, cam_loc, cam_deg = self.read_json_view(coords_info)
+            # read images
+            img_path_name = os.path.join(img_path, img_name)
+
+            img = cv2.imread(img_path_name)
+            if img is None:
+                raise ValueError('img is None')
+
+            img = img[:, :, (2, 1, 0)]  # BGR -> RGB
+            img = img.astype('float32')
+
+            img = img / 255.0
+            img[:, :, 0] = (img[:, :, 0] - 0.485) / 0.229
+            img[:, :, 1] = (img[:, :, 1] - 0.456) / 0.224
+            img[:, :, 2] = (img[:, :, 2] - 0.406) / 0.225
+
+            img_views.append(img)
+            cam_locations.append(cam_loc)
+
+            coords_2d = np.asarray(coords_2d)
+            single_view_dmaps_i = self.density_map_creation(coords_2d, w=640, h=360)
+            single_view_dmaps_i = np.expand_dims(single_view_dmaps_i, axis=0)
+            single_view_dmaps.append(single_view_dmaps_i)
+
+            # form the camera paras list
+            camera_paras.append(paras)
+
+            # get the wld_coords:
+            wld_coords = wld_coords + coords
+
+        # print(f'final length:{len(img_views)}')
+        # if len(img_views) < self.view_size:
+        # print(f'Warning: only {len(img_views)} views found, need {self.view_size}. Resampling.')
+
+        # assert len(img_views) == self.view_size, f'len(img_views)={len(img_views)} != self.view_size={self.view_size}'
+        # get the wld coords
+        wld_coords = self.id_unique(wld_coords)
+        wld_coords = np.asarray(wld_coords)
+
+        # create the map_gts, instead of density maps
+        GP_point_map, cam_location, whole_pl_map = self.GP_density_map_creation(wld_coords,
+                                                                                self.cropped_size,
+                                                                                wld_map_paras,
+                                                                                hw_random,
+                                                                                cam_location=cam_locations)
+
+        img_views = np.asarray(img_views)
+        camera_paras = np.asarray(camera_paras)
+
+        img_views = np.transpose(img_views, (0, 3, 1, 2))
+        img_views = torch.from_numpy(img_views)
+        img_views = torch.nn.functional.interpolate(img_views, [720, 1280])
+
+        cam_location = [c / self.cropped_size[-2] for c in cam_location]
+        cam_location = torch.tensor(np.array(cam_location))
+
+        single_view_dmaps = np.asarray(single_view_dmaps)
+
+        from scripts.multiview_detector.loss.gaussian_blur_detecting import draw_umich_gaussian
+
+        GP_density_map = []
+        for i in range(self.patch_num):
+            heatmap = np.zeros_like(GP_point_map[i])
+            centers = np.transpose(np.nonzero(GP_point_map[i]))
+            for center in centers:
+                heatmap = draw_umich_gaussian(heatmap, center, 3)
+            GP_density_map.append(heatmap)
+
+        GP_density_map = np.asarray(GP_density_map) * self.scale
+        if self.train:
+            return img_views, single_view_dmaps, camera_paras, wld_map_paras, hw_random, GP_point_map, GP_density_map, cam_location
+        else:
+            return img_views, single_view_dmaps, camera_paras, wld_map_paras, hw_random, GP_point_map, cam_location, whole_pl_map
+
+    def __len__(self):
+        if self.train:
+            len_num = self.nb_scenes * 10 * self.nb_samplings
+        else:
+            len_num = self.nb_scenes * self.frames * self.nb_samplings
+
+        return len_num
+
+
+def test():
+    from scripts.multiview_detector.datasets.lcvcs.Wildtrack import Wildtrack
+    dataset = frameDataset(
+        Wildtrack(os.path.expanduser('/mnt/d/Datasets/Wildtrack')), degree_range=-30, train=False, num_cam=5,
+        frames=10)
+
+    # plt.imshow(np.sum(np.stack(world_grid_maps), axis=0))
+    # plt.show()
+    # pass
+    # imgs, map_gt, imgs_gt, _ = dataset.__getitem__(0)
+    # import matplotlib.pyplot as plt
+    # img_views, single_view_dmaps, camera_paras, wld_map_paras, hw_random, GP_point_map, GP_density_map, cam_location_ = dataset.__getitem__(18)
+    #
+    # img_views = np.transpose(img_views, (0, 2, 3, 1))
+    # for i in range(3):
+    #     map = GP_density_map[i]
+    #     plt.imshow(map)
+    #     plt.show()
+    #
+    # print(img_views.shape)
+    # pass
+    for i, (img_views, single_view_dmaps, camera_paras, wld_map_paras, hw_random, GP_point_map, GP_density_map,
+            cam_location_) in enumerate(dataset):
+        pass
+        # if i % 10 == 0:
+        #     print(f"Sample {i}:")
+        #     print(f"Image Views Shape: {img_views.shape}")
+        #     print(f"Single View Dmaps Shape: {single_view_dmaps.shape}")
+        #     print(f"Camera Paras Shape: {camera_paras.shape}")
+        #     print(f"WLD Map Paras: {wld_map_paras}")
+        #     print(f"HW Random: {hw_random}")
+        #     print(f"GP Point Map Shape: {GP_point_map.shape}")
+        #     print(f"GP Density Map Shape: {GP_density_map.shape}")
+        #     print(f"Cam Location Shape: {cam_location_.shape}\n")
+
+
+if __name__ == '__main__':
+    test()
