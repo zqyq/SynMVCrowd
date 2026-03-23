@@ -29,14 +29,15 @@ with support for datasets such as Wildtrack and  SynMVCrowd. Pretrained models f
 
 - **Split**: Training (30 scenes), Validation (10 scenes), Test (10 scenes) in 3:1:1 ratio.
 - **Annotations**: Head coordinates in image/world space, semantic segmentation, camera parameters, weather/time metadata.
-- **Download**: The dataset will be made publicly available upon paper acceptance. Contact the authors for early access.
+- **Download**: Please click this url for downloading the SynMVCrowd datasets. https://www.dropbox.com/home/SynMVCrowd/SynMVCrowdDataset
+
 
 ## Installation
 **Requirements**
-
-Python 3.8+
-PyTorch 1.10+ with CUDA support
-Dependencies: numpy, torchvision, tqdm, opencv-python (install via pip install -r requirements.txt)
+``` 
+conda create -n synmvc python=3.10 -y
+pip install -r requirements.txt
+```
 
 ## Setup
 
