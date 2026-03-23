@@ -15,7 +15,7 @@ Key contributions from the paper:
 
 The code includes training and testing scripts for multi-view detectors like MVDeTr, 
 with support for datasets such as Wildtrack and  SynMVCrowd. Pretrained models from SynMVCrowd are loaded for enhanced performance.
-
+![SynMVCrowd Dataset Samples](demo_img/SynMVCrowd%20Introduction.png)
 ## Data Statistics
 | Dataset          | Type | Scenes | Size (m)   | Cameras   | Frames | Avg. Resolution | Total Counts | Min | Avg | Max  |
 |------------------|------|--------|------------|-----------|--------|-----------------|-------------|-----|-----|------|
