@@ -1,6 +1,6 @@
-# SynMVCrowd: A Large Synthetic Benchmark for Multi-View Crowd Counting and Localization
+# SynMVCrowd: A Large Synthetic Benchmark for Multi-View Crowd Counting and Localization, IJCV 2026
 
-Overview
+## Overview
 This repository provides the code implementation for the baselines proposed in the paper "SynMVCrowd: A Large Synthetic Benchmark for Multi-view Crowd Counting and Localization". The SynMVCrowd benchmark is the largest synthetic dataset for multi-view and single-image crowd vision tasks, featuring 50 diverse scenes, 50 camera views per scene, 200 multi-view frames per scene, and crowd sizes ranging from 200 to 1000 people (average >500). It supports practical evaluation of multi-view crowd counting, localization, and domain transfer under cross-scene settings.
 The dataset addresses limitations in existing multi-view datasets (e.g., Wildtrack, MultiviewX, CVCS) by offering larger scenes, higher crowd densities, variable weather conditions (clear, cloudy, rainy, etc.), light variations (0-24 hours), and diverse urban environments (parks, beaches, streets, etc.). It can also serve as a challenging benchmark for single-image crowd counting and localization.
 Key contributions from the paper:
@@ -12,7 +12,9 @@ Key contributions from the paper:
 The code includes training and testing scripts for multi-view detectors like MVDeTr, 
 with support for datasets such as Wildtrack and  SynMVCrowd. Pretrained models from SynMVCrowd are loaded for enhanced performance.
 ![SynMVCrowd Dataset Samples](demo_img/SynMVCrowd%20Introduction.png)
+
 ## Data Statistics
+
 | Dataset          | Type | Scenes | Size (m)   | Cameras   | Frames | Avg. Resolution | Total Counts | Min | Avg | Max  |
 |------------------|------|--------|------------|-----------|--------|-----------------|-------------|-----|-----|------|
 | PETS2009 [9]     | Real | 1      | -          | 3         | 1,899  | 576x768         | -           | 20  | -   | 40   |
@@ -26,6 +28,9 @@ with support for datasets such as Wildtrack and  SynMVCrowd. Pretrained models f
 - **Split**: Training (30 scenes), Validation (10 scenes), Test (10 scenes) in 3:1:1 ratio.
 - **Annotations**: Head coordinates in image/world space, semantic segmentation, camera parameters, weather/time metadata.
 - **Download**: Please click this url for downloading the SynMVCrowd datasets. https://www.dropbox.com/home/SynMVCrowd/SynMVCrowdDataset
+
+## Dataset Download
+
 
 
 ## Installation
@@ -60,6 +65,7 @@ Command-Line Arguments
 - pretrained_dir: Path to pretrained model (e.g., SynMVCrowd checkpoint).
 - visualize: Enable visualization.
 - test: Run in test mode only.
+
 
 ## Ackonwledgement
 This work was supported in parts by National Natural Science Foundation of China (No. 62202312, U21B2023, U2001206), Guangdong Basic
