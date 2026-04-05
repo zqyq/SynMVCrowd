@@ -32,7 +32,7 @@ https://www.dropbox.com/scl/fo/1kkx2rexita03zrh97nli/ANMJ2Q8fI2PIOrqSHiN3heA?rlk
 ```
 passwd:
 ```aiignore
-iMSUE
+iMUSE
 ```
 ## Installation
 **Requirements**
